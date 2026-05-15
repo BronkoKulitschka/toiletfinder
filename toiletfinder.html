@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ToiletFinder</title>
+
+<!-- PWA -->
+<meta name="theme-color" content="#0f0f0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ToiletFinder">
+<link rel="manifest" id="manifestLink">
+<link rel="apple-touch-icon" id="appleIcon">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+:root {
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --surface2: #222;
+  --border: #2a2a2a;
+  --accent: #b8ff57;
+  --blue: #57d4ff;
+  --text: #f0f0f0;
+  --muted: #777;
+  --r: 14px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.logo { font-size: 1.15rem; font-weight: 700; letter-spacing: -.3px; flex: 1; }
+.logo em { color: var(--accent); font-style: normal; }
+
+.hdr-btn {
+  width: 36px; height: 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text);
+  transition: border-color .15s;
+}
+.hdr-btn:hover { border-color: var(--accent); }
+.hdr-btn.on { background: var(--accent); color: #000; border-color: var(--accent); }
+
+.filters {
+  display: flex; gap: 8px;
+  padding: 8px 16px;
+  overflow-x: auto; scrollbar-width: none;
+  flex-shrink: 0; background: var(--bg);
+}
+.filters::-webkit-scrollbar { display: none; }
+.chip {
+  padding: 5px 13px; border-radius: 99px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); font-size: .78rem; font-weight: 500;
+  white-space: nowrap; cursor: pointer; transition: all .15s;
+}
+.chip.on { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+
+.map-wrap { flex: 1; position: relative; overflow: hidden; }
+#map { width: 100%; height: 100%; }
+.leaflet-container { background: #111; }
+.leaflet-tile { filter: brightness(.8) saturate(.6); }
+
+.fab {
+  position: absolute; right: 14px;
+  width: 42px; height: 42px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 12px; font-size: 1.1rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 12px rgba(0,0,0,.6); z-index: 500;
+  color: var(--text); transition: border-color .15s;
+}
+.fab:hover { border-color: var(--accent); }
+.fab-locate { bottom: 230px; }
+.fab-refresh { bottom: 286px; }
+.fab-locate.spin { border-color: var(--accent); animation: glow 1s infinite; }
+@keyframes glow {
+  0%,100% { box-shadow: 0 0 0 0 rgba(184,255,87,.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(184,255,87,0); }
+}
+
+.sheet {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 400;
+  background: var(--surface); border-radius: 18px 18px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; max-height: 80dvh;
+  transition: transform .32s cubic-bezier(.32,.72,0,1);
+}
+.sheet.hidden { transform: translateY(100%); }
+.sheet.peek  { transform: translateY(calc(100% - 52px)); }
+.sheet.open  { transform: translateY(0); }
+
+.sheet-pill {
+  width: 32px; height: 4px; background: var(--border);
+  border-radius: 2px; margin: 10px auto 0; cursor: pointer; flex-shrink: 0;
+}
+.sheet-top {
+  padding: 10px 16px 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sheet-label { font-size: .82rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.sheet-count { font-size: .78rem; color: var(--accent); font-weight: 600; }
+.sheet-scroll {
+  overflow-y: auto; padding: 6px 12px 28px; flex: 1;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+
+.card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--r);
+  margin-bottom: 8px; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.card:active, .card.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.card-icon {
+  width: 46px; height: 46px; border-radius: 12px;
+  background: rgba(184,255,87,.08);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; flex-shrink: 0;
+}
+.card-icon.wc { background: rgba(87,212,255,.1); }
+.card-body { flex: 1; min-width: 0; }
+.card-name {
+  font-size: .9rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;
+}
+.card-sub { font-size: .75rem; color: var(--muted); }
+.card-sub .wc-tag { color: var(--blue); font-weight: 600; }
+.card-dist { font-size: .9rem; font-weight: 700; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+
+.detail {
+  position: absolute; inset: 0; z-index: 800;
+  background: var(--bg);
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.32,.72,0,1);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.detail.open { transform: translateX(0); }
+
+.detail-hdr {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg); z-index: 5;
+}
+.back {
+  width: 34px; height: 34px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 9px;
+  cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center; color: var(--text);
+}
+.detail-name { font-size: 1rem; font-weight: 700; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.detail-body { padding: 18px 16px; }
+
+.info-block {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); overflow: hidden; margin-bottom: 12px;
+}
+.info-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 16px; border-bottom: 1px solid var(--border); font-size: .88rem;
+}
+.info-row:last-child { border-bottom: none; }
+.info-label { color: var(--muted); }
+.info-val { font-weight: 600; }
+.info-val.yes { color: var(--accent); }
+.info-val.no  { color: var(--muted); }
+.info-val.blue { color: var(--blue); }
+
+.btn-route {
+  width: 100%; padding: 15px;
+  background: var(--accent); color: #000;
+  font-size: 1rem; font-weight: 700;
+  border: none; border-radius: var(--r); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: opacity .15s, transform .15s;
+}
+.btn-route:active { opacity: .85; transform: scale(.98); }
+
+.overlay {
+  position: absolute; inset: 0; z-index: 1000;
+  background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  transition: opacity .3s;
+}
+.overlay.gone { opacity: 0; pointer-events: none; }
+.ov-title { font-size: 1.5rem; font-weight: 700; }
+.ov-title em { color: var(--accent); font-style: normal; }
+.ov-spin {
+  width: 30px; height: 30px;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: sp .7s linear infinite;
+}
+@keyframes sp { to { transform: rotate(360deg); } }
+.ov-msg { font-size: .85rem; color: var(--muted); text-align: center; max-width: 260px; line-height: 1.6; white-space: pre-line; }
+.ov-msg.err { color: #ff6b6b; }
+.btn-retry {
+  padding: 10px 24px; background: var(--accent); color: #000;
+  border: none; border-radius: 10px; font-weight: 700; cursor: pointer; display: none;
+}
+
+.empty {
+  text-align: center; padding: 28px 16px;
+  color: var(--muted); font-size: .85rem; line-height: 1.6; display: none;
+}
+
+.toast {
+  position: absolute; bottom: 160px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 9px 16px; font-size: .82rem;
+  z-index: 900; opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s; white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.m-dot {
+  width: 32px; height: 32px;
+  border-radius: 50% 50% 50% 4px; transform: rotate(-45deg);
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid rgba(255,255,255,.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+.m-dot span { transform: rotate(45deg); font-size: .9rem; }
+.m-std  { background: #2a5a00; }
+.m-wc   { background: #005a6e; }
+.m-svc  { background: #5a3a00; }
+.m-rest { background: #3a003a; }
+.u-dot {
+  width: 14px; height: 14px; background: var(--blue);
+  border: 3px solid #fff; border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(87,212,255,.2);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Toilet<em>Finder</em></div>
+  <button class="hdr-btn" id="btnList">☰ <span id="listCount" style="font-size:.7rem;font-weight:700;color:var(--accent);margin-left:2px"></span></button>
+</header>
+
+<div class="filters">
+  <div class="chip on" data-f="all">Alle</div>
+  <div class="chip"    data-f="wheelchair">♿ Barrierefrei</div>
+</div>
+
+<div class="map-wrap">
+  <div id="map"></div>
+
+  <button class="fab fab-locate" id="btnLocate">📍</button>
+  <button class="fab fab-refresh" id="btnRefresh" title="Hier suchen">🔍</button>
+
+  <div class="sheet hidden" id="sheet">
+    <div class="sheet-pill" id="pill"></div>
+    <div class="sheet-top">
+      <span class="sheet-label">In der Nähe</span>
+      <span class="sheet-count" id="sheetCount">–</span>
+    </div>
+    <div class="sheet-scroll" id="list">
+      <div class="empty" id="empty">Keine Toiletten im Umkreis von 1 km gefunden.</div>
+    </div>
+  </div>
+
+  <div class="detail" id="detail">
+    <div class="detail-hdr">
+      <button class="back" id="btnBack">←</button>
+      <div class="detail-name" id="detailName"></div>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="ov-title">Toilet<em>Finder</em></div>
+    <div class="ov-spin" id="ovSpin"></div>
+    <div class="ov-msg"  id="ovMsg">Standort wird ermittelt…</div>
+    <button class="btn-retry" id="btnRetry" onclick="location.reload()">Erneut versuchen</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+let map, userMarker, markers = [];
+let userLat = null, userLng = null;
+let toilets = [], filter = 'all', sheetOpen = false;
+
+window.addEventListener('DOMContentLoaded', () => {
+  initMap(); setupUI(); locate(); setupPWA();
+});
+
+function initMap() {
+  map = L.map('map', { center: [51.165, 10.45], zoom: 6, zoomControl: false, attributionControl: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  L.control.zoom({ position: 'topright' }).addTo(map);
+  map.on('click', () => { collapseSheet(); deselect(); });
+
+  // Re-search when user pans or zooms (debounced 600ms)
+  let moveTimer;
+  map.on('moveend zoomend', () => {
+    if (!userLat) return;
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(() => {
+      const c = map.getCenter();
+      fetchToiletsForView(c.lat, c.lng);
+    }, 600);
+  });
+}
+
+function locate() {
+  if (!navigator.geolocation) { showError('GPS wird von deinem Browser nicht unterstützt.'); return; }
+  navigator.geolocation.getCurrentPosition(onPos, onGpsErr, { timeout: 12000, maximumAge: 60000 });
+}
+
+function onPos(pos) {
+  userLat = pos.coords.latitude;
+  userLng = pos.coords.longitude;
+  map.setView([userLat, userLng], 16);
+  if (userMarker) map.removeLayer(userMarker);
+  userMarker = L.marker([userLat, userLng], {
+    icon: L.divIcon({ html: '<div class="u-dot"></div>', className: '', iconSize: [14,14], iconAnchor: [7,7] }),
+    zIndexOffset: 1000
+  }).addTo(map);
+  setMsg('Toiletten werden gesucht…');
+  fetchToilets(userLat, userLng);
+}
+
+function onGpsErr(err) {
+  showError(err.code === 1
+    ? 'Standortzugriff verweigert.\nBitte in den Browser-Einstellungen erlauben.'
+    : 'Standort konnte nicht ermittelt werden.\nBitte erneut versuchen.');
+}
+
+async function fetchToilets(lat, lng) {
+  const q = `[out:json][timeout:25];
+(
+  node["amenity"="toilets"](around:2000,${lat},${lng});
+  node["amenity"="fuel"]["toilets"="yes"](around:2000,${lat},${lng});
+  node["highway"="services"](around:2000,${lat},${lng});
+  node["amenity"="rest_area"](around:2000,${lat},${lng});
+  node["amenity"="service_area"](around:2000,${lat},${lng});
+  way["highway"="services"](around:2000,${lat},${lng});
+  way["amenity"="rest_area"](around:2000,${lat},${lng});
+  relation["highway"="services"](around:2000,${lat},${lng});
+);
+out center body;`;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q));
+    const data = await res.json();
+    toilets = (data.elements || [])
+      .map(n => parseNode(n, lat, lng))
+      .filter(Boolean)
+      .sort((a, b) => a.dist - b.dist);
+    render();
+    hideOverlay();
+  } catch {
+    showError('Daten konnten nicht geladen werden.\nInternetverbindung prüfen und neu laden.');
+  }
+}
+
+// Search for toilets centered on map view (used when panning/zooming)
+let fetchingView = false;
+async function fetchToiletsForView(lat, lng) {
+  if (fetchingView) return;
+  fetchingView = true;
+
+  // Calculate radius based on visible map area
+  const bounds = map.getBounds();
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const radius = Math.min(
+    Math.round(haversine(lat, lng, ne.lat, ne.lng)),
+    5000 // cap at 5 km so Overpass doesn't time out
+  );
+
+  const q = `[out:json][timeout:25];
+(
+  node["amenity"="toilets"](around:${radius},${lat},${lng});
+  node["amenity"="fuel"]["toilets"="yes"](around:${radius},${lat},${lng});
+  node["highway"="services"](around:${radius},${lat},${lng});
+  node["amenity"="rest_area"](around:${radius},${lat},${lng});
+  node["amenity"="service_area"](around:${radius},${lat},${lng});
+  way["highway"="services"](around:${radius},${lat},${lng});
+  way["amenity"="rest_area"](around:${radius},${lat},${lng});
+  relation["highway"="services"](around:${radius},${lat},${lng});
+);
+out center body;`;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q));
+    const data = await res.json();
+    // Merge with existing toilets (avoid duplicates by id)
+    const existing = new Map(toilets.map(t => [t.id, t]));
+    (data.elements || []).forEach(n => {
+      const parsed = parseNode(n, userLat, userLng);
+      if (parsed && !existing.has(n.id)) existing.set(n.id, parsed);
+    });
+    toilets = Array.from(existing.values()).sort((a, b) => a.dist - b.dist);
+    render();
+    showToast(`${toilets.length} Toiletten geladen`);
+  } catch {
+    showToast('Laden fehlgeschlagen – Verbindung prüfen');
+  } finally {
+    fetchingView = false;
+  }
+}
+
+function parseNode(node, uLat, uLng) {
+  const t = node.tags || {};
+  // ways/relations have center coordinates
+  const lat = node.lat ?? node.center?.lat;
+  const lng = node.lon ?? node.center?.lng;
+  if (!lat || !lng) return null;
+
+  // Determine type & icon
+  let type = 'toilet';
+  let name = t.name || t['name:de'];
+  if (t.highway === 'services' || t.amenity === 'service_area') {
+    type = 'services';
+    name = name || 'Autobahnraststätte';
+  } else if (t.amenity === 'rest_area') {
+    type = 'rest_area';
+    name = name || 'Rastplatz';
+  } else if (t.amenity === 'fuel') {
+    type = 'fuel';
+    name = name || 'Tankstelle';
+  } else {
+    name = name || 'Öffentliche Toilette';
+  }
+
+  // Services & rest areas always have toilets
+  const hasToilet = type !== 'toilet' ? true : true;
+
+  return {
+    id: node.id, lat, lng,
+    name, type,
+    wheelchair: t.wheelchair === 'yes' || t.wheelchair === 'designated',
+    fee: t.fee === 'yes',
+    hours: t.opening_hours || null,
+    operator: t.operator || t.brand || null,
+    dist: haversine(uLat, uLng, lat, lng)
+  };
+}
+
+function render() {
+  const list = filter === 'wheelchair' ? toilets.filter(t => t.wheelchair) : toilets;
+  renderMarkers(list);
+  renderList(list);
+  document.getElementById('sheetCount').textContent = `${list.length} gefunden`;
+  document.getElementById('listCount').textContent = list.length > 0 ? list.length : '';
+  document.getElementById('empty').style.display = list.length === 0 ? 'block' : 'none';
+  // don't auto-expand – user opens list manually
+}
+
+function renderMarkers(list) {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  list.forEach(t => {
+    const m = L.marker([t.lat, t.lng], {
+      icon: L.divIcon({
+        html: `<div class="m-dot ${t.wheelchair ? 'm-wc' : t.type === 'services' ? 'm-svc' : t.type === 'rest_area' ? 'm-rest' : 'm-std'}"><span>${t.wheelchair ? '♿' : t.type === 'services' ? '🛣️' : t.type === 'rest_area' ? '🅿️' : t.type === 'fuel' ? '⛽' : '🚽'}</span></div>`,
+        className: '', iconSize: [32,36], iconAnchor: [16,34]
+      })
+    }).addTo(map).on('click', e => { L.DomEvent.stopPropagation(e); selectCard(t.id); openDetail(t.id); });
+    markers.push(m);
+  });
+}
+
+function renderList(list) {
+  const el = document.getElementById('list');
+  el.querySelectorAll('.card').forEach(c => c.remove());
+  list.forEach(t => {
+    const d = document.createElement('div');
+    d.className = 'card'; d.id = `c-${t.id}`;
+    const typeIcon = {services:'🛣️', rest_area:'🅿️', fuel:'⛽', toilet:'🚽'}[t.type] || '🚽';
+    const typeLabel = {services:'Raststätte', rest_area:'Rastplatz', fuel:'Tankstelle', toilet:'Toilette'}[t.type] || 'Toilette';
+    d.innerHTML = `
+      <div class="card-icon ${t.wheelchair ? 'wc' : ''}">${t.wheelchair ? '♿' : typeIcon}</div>
+      <div class="card-body">
+        <div class="card-name">${t.name}</div>
+        <div class="card-sub">${typeLabel}${t.wheelchair ? ' · <span class="wc-tag">Barrierefrei</span>' : ''}</div>
+      </div>
+      <div class="card-dist">${fmtDist(t.dist)}</div>
+    `;
+    d.addEventListener('click', () => openDetail(t.id));
+    el.appendChild(d);
+  });
+}
+
+function openDetail(id) {
+  const t = toilets.find(x => x.id === id);
+  if (!t) return;
+  selectCard(id);
+  document.getElementById('detailName').textContent = t.name;
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lng}&travelmode=walking`;
+  const typeLabel = {services:'Raststätte', rest_area:'Rastplatz', fuel:'Tankstelle', toilet:'Toilette'}[t.type] || 'Toilette';
+  document.getElementById('detailBody').innerHTML = `
+    <div class="info-block">
+      <div class="info-row">
+        <span class="info-label">Typ</span>
+        <span class="info-val">${typeLabel}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Entfernung</span>
+        <span class="info-val blue">${fmtDist(t.dist)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Barrierefrei</span>
+        <span class="info-val ${t.wheelchair ? 'yes' : 'no'}">${t.wheelchair ? '✓ Ja' : '✗ Nein'}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Eintritt</span>
+        <span class="info-val">${t.fee ? 'Kostenpflichtig' : 'Kostenlos'}</span>
+      </div>
+      ${t.hours ? `<div class="info-row"><span class="info-label">Öffnungszeiten</span><span class="info-val">${t.hours}</span></div>` : ''}
+      ${t.operator ? `<div class="info-row"><span class="info-label">Betreiber</span><span class="info-val">${t.operator}</span></div>` : ''}
+    </div>
+    <button class="btn-route" onclick="window.open('${url}','_blank')">🧭 Route starten</button>
+  `;
+  document.getElementById('detail').classList.add('open');
+  map.setView([t.lat, t.lng], 17, { animate: true });
+}
+
+function setupUI() {
+  document.getElementById('pill').addEventListener('click', toggleSheet);
+  document.getElementById('btnList').addEventListener('click', toggleSheet);
+  document.getElementById('btnBack').addEventListener('click', () => document.getElementById('detail').classList.remove('open'));
+  document.getElementById('btnRefresh').addEventListener('click', () => {
+    if (!userLat) return showToast('Warte auf Standort…');
+    const c = map.getCenter();
+    fetchToiletsForView(c.lat, c.lng);
+  });
+
+  document.getElementById('btnLocate').addEventListener('click', () => {
+    if (!userLat) return showToast('Standort nicht verfügbar');
+    map.setView([userLat, userLng], 16, { animate: true });
+    const b = document.getElementById('btnLocate');
+    b.classList.add('spin');
+    setTimeout(() => b.classList.remove('spin'), 1400);
+  });
+  document.querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+      c.classList.add('on'); filter = c.dataset.f; render();
+    });
+  });
+}
+
+function toggleSheet() { sheetOpen ? collapseSheet() : expandSheet(); }
+function expandSheet() {
+  sheetOpen = true;
+  document.getElementById('sheet').className = 'sheet open';
+  document.getElementById('btnList').classList.add('on');
+}
+function collapseSheet() {
+  sheetOpen = false;
+  document.getElementById('sheet').className = 'sheet hidden';
+  document.getElementById('btnList').classList.remove('on');
+}
+function selectCard(id) {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('sel'));
+  const c = document.getElementById(`c-${id}`);
+  if (c) { c.classList.add('sel'); c.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+}
+function deselect() { document.querySelectorAll('.card').forEach(c => c.classList.remove('sel')); }
+
+function setMsg(t) { document.getElementById('ovMsg').textContent = t; }
+function hideOverlay() { setTimeout(() => document.getElementById('overlay').classList.add('gone'), 300); }
+function showError(txt) {
+  document.getElementById('ovSpin').style.display = 'none';
+  const m = document.getElementById('ovMsg'); m.textContent = txt; m.classList.add('err');
+  document.getElementById('btnRetry').style.display = 'block';
+}
+
+let _tt;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(_tt); _tt = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function haversine(a, b, c, d) {
+  const R = 6371000, r = Math.PI/180, dL = (c-a)*r, dN = (d-b)*r;
+  const x = Math.sin(dL/2)**2 + Math.cos(a*r)*Math.cos(c*r)*Math.sin(dN/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+function fmtDist(m) { return m < 1000 ? `${Math.round(m)} m` : `${(m/1000).toFixed(1)} km`; }
+
+function setupPWA() {
+  const c = document.createElement('canvas'); c.width = c.height = 192;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0f0f0f'; ctx.beginPath(); ctx.roundRect(0,0,192,192,34); ctx.fill();
+  ctx.fillStyle = '#b8ff57'; ctx.beginPath(); ctx.roundRect(28,28,136,136,22); ctx.fill();
+  ctx.font = '72px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🚽', 96, 98);
+  const ico = c.toDataURL('image/png');
+  document.getElementById('appleIcon').href = ico;
+  const blob = new Blob([JSON.stringify({
+    name:'ToiletFinder', short_name:'ToiletFinder', start_url:'.', display:'standalone',
+    background_color:'#0f0f0f', theme_color:'#0f0f0f', orientation:'portrait-primary', lang:'de',
+    icons:[{src:ico, sizes:'192x192', type:'image/png', purpose:'any maskable'}]
+  })], {type:'application/json'});
+  document.getElementById('manifestLink').href = URL.createObjectURL(blob);
+}
+</script>
+</body>
+</html>
